@@ -17,7 +17,7 @@ Base = declarative_base()
 
 
 class Table(Base):
-    __tablename__ = 'my_table'
+    __tablename__ = "my_table"
     id = Column(Integer, primary_key=True)
     _column = Column("column", JSONType)
     column: json_type = JSONProperty("_column")
