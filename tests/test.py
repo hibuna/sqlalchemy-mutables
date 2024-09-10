@@ -17,7 +17,7 @@ Base = declarative_base()
 
 
 class Table(Base):
-    __tablename__ = 'table'
+    __tablename__ = "table"
     id = Column(Integer, primary_key=True)
     _column = Column("column", JSONType)
     column: json_type = JSONProperty("_column")
@@ -40,7 +40,7 @@ class TestRoot(TestCase):
         assert isinstance(table._column.get("value"), _NestedMutableArray)
         assert table._column.get("value") == ["a"]
 
-        table = Table(column=("a", ))
+        table = Table(column=("a",))
         assert isinstance(table.column, _NestedMutableArray)
         assert table.column == ["a"]
         assert isinstance(table._column, _NestedMutableWrapper)
@@ -99,6 +99,7 @@ class TestRoot(TestCase):
         table.column = None
         assert table.column is None
         assert table._column.get("value") is None
+
 
 class TestNested(TestCase):
 
@@ -181,7 +182,9 @@ class TestPropagation(TestCase):
 
     @classmethod
     def setUpClass(cls):
-        engine = create_engine("mysql+pymysql://sqlalchemy-mutables:password@localhost/table")
+        engine = create_engine(
+            "mysql+pymysql://sqlalchemy-mutables:password@localhost/table"
+        )
         cls.session = create_session(engine, autoflush=False, autocommit=False)
         cls._truncate()
 
@@ -301,7 +304,11 @@ class TestObjectMethods(TestCase):
         object.update({"c": {"d": {"e": "f"}}}, g={"h": {"i": "j"}})
 
         assert isinstance(object, _NestedMutableObject)
-        assert object == {"a": "b", "c": {"d": {"e": "f"}}, "g": {"h": {"i": "j"}}}
+        assert object == {
+            "a": "b",
+            "c": {"d": {"e": "f"}},
+            "g": {"h": {"i": "j"}},
+        }
         assert object._parent_mutable is None
 
         assert isinstance(object["c"], _NestedMutableObject)
@@ -402,4 +409,3 @@ class TestArrayMethods(TestCase):
         assert isinstance(array[1][1][1], _NestedMutableArray)
         assert array[1][1][1] == ["f"]
         assert array[1][1][1]._parent_mutable is array[1][1]
-
