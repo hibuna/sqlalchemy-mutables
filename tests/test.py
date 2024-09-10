@@ -17,7 +17,7 @@ Base = declarative_base()
 
 
 class Table(Base):
-    __tablename__ = "table"
+    __tablename__ = 'my_table'
     id = Column(Integer, primary_key=True)
     _column = Column("column", JSONType)
     column: json_type = JSONProperty("_column")
@@ -172,20 +172,24 @@ class TestNested(TestCase):
         assert table.column[1][1][1][0] == "d"
 
 
-class TestPropagation(TestCase):
+class TestDBAPI(TestCase):
     session: Session
 
     @classmethod
     def _truncate(cls):
-        cls.session.execute("TRUNCATE `table`;")
+        cls.session.execute("TRUNCATE `my_table`;")
         assert cls.session.query(Table).count() == 0
 
     @classmethod
     def setUpClass(cls):
-        engine = create_engine(
-            "mysql+pymysql://sqlalchemy-mutables:password@localhost/table"
-        )
+        engine = create_engine("mysql+pymysql://root@localhost:3310/my_db")
         cls.session = create_session(engine, autoflush=False, autocommit=False)
+        cls.session.execute(
+            "CREATE TABLE IF NOT EXISTS `my_table` ("
+            "id INT PRIMARY KEY AUTO_INCREMENT,"
+            "`column` JSON"
+            ")"
+        )
         cls._truncate()
 
     def tearDown(self):
@@ -193,21 +197,25 @@ class TestPropagation(TestCase):
 
     def test_wrapper_not_persisted_in_db(self):
         # create nested JSON entity
-        table = Table(id=1, column={"a": "b"})
+        table = Table(column={"a": "b"})
         self.session.add(table)
         self.session.commit()
 
+        table_id = table.id
+
         raw_column_value = self.session.execute(
-            "SELECT `table`.`column` FROM `table` WHERE `table`.`id` = 1;"
+            f"SELECT my_table.`column` FROM my_table WHERE my_table.id = {table_id};"
         ).scalar()
         assert "value" not in raw_column_value
         assert raw_column_value == '{"a": "b"}'
 
     def test_nested_object(self):
         # create nested JSON entity
-        table = Table(id=2, column={"a": {"b": {"c": {"d": "e"}}}})
+        table = Table(column={"a": {"b": {"c": {"d": "e"}}}})
         self.session.add(table)
         self.session.commit()
+
+        table_id = table.id
 
         # make nested change
         table.column["a"]["b"] = {"f": {"g": "h"}}
@@ -218,7 +226,7 @@ class TestPropagation(TestCase):
         del table
 
         # assert change persisted
-        table = self.session.query(Table).filter(Table.id == 2).first()
+        table = self.session.query(Table).filter(Table.id == table_id).first()
         assert table.column["a"]["b"]["f"]["g"] == "h"
 
         # make nested change
@@ -230,14 +238,16 @@ class TestPropagation(TestCase):
         del table
 
         # # assert change persisted
-        table = self.session.query(Table).filter(Table.id == 2).first()
+        table = self.session.query(Table).filter(Table.id == table_id).first()
         assert table.column["a"]["b"]["f"]["g"] == "i"
 
     def test_nested_array(self):
         # create nested JSON entity
-        table = Table(id=3, column=["a", ["b", ["c", ["d"]]]])
+        table = Table(column=["a", ["b", ["c", ["d"]]]])
         self.session.add(table)
         self.session.commit()
+
+        table_id = table.id
 
         # make nested change
         table.column[1][1] = ["e", ["f", ["g"]]]
@@ -248,7 +258,7 @@ class TestPropagation(TestCase):
         del table
 
         # assert change persisted
-        table = self.session.query(Table).filter(Table.id == 3).first()
+        table = self.session.query(Table).filter(Table.id == table_id).first()
         assert table.column[1][1] == ["e", ["f", ["g"]]]
 
         # make nested change
@@ -260,11 +270,11 @@ class TestPropagation(TestCase):
         del table
 
         # # assert change persisted
-        table = self.session.query(Table).filter(Table.id == 3).first()
+        table = self.session.query(Table).filter(Table.id == table_id).first()
         assert table.column[1][1][1] == "i"
 
     def test_multiple_root_objects_get_parent(self):
-        table = Table(id=4, column={"a": ["b"], "c": ("d",), "e": {"f": "g"}})
+        table = Table(column={"a": ["b"], "c": ("d",), "e": {"f": "g"}})
         self.session.add(table)
         self.session.commit()
 
@@ -273,7 +283,7 @@ class TestPropagation(TestCase):
             assert value._parent_mutable is table._column
 
     def test_multiple_root_arrays_get_parent(self):
-        table = Table(id=5, column=[["a"], ("b",), {"c": "d"}])
+        table = Table(column=[["a"], ("b",), {"c": "d"}])
         self.session.add(table)
         self.session.commit()
 
