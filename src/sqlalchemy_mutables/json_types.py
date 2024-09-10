@@ -16,6 +16,9 @@ from sqlalchemy.orm.attributes import flag_modified, InstrumentedAttribute
 from sqlalchemy.sql.elements import BinaryExpression
 
 
+__all__ = ["json_type", "JSONType", "JSONProperty"]
+
+
 _primitive_types = (str, int, float, bool, type(None))
 json_type = TypeVar("json_type", str, int, float, list, tuple, bool, type(None))
 
