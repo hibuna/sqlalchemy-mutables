@@ -1,12 +1,12 @@
 from typing import TypeVar
 
 from sqlalchemy import JSON, TypeDecorator
-from sqlalchemy.ext.mutable import (Mutable, MutableDict, MutableList)
+from sqlalchemy.ext.mutable import Mutable, MutableDict, MutableList
 from sqlalchemy.orm.attributes import flag_modified
 
 
 _primitive_types = (str, int, float, bool, type(None))
-json_type = TypeVar('json_type', str, int, float, list, tuple, bool, type(None))
+json_type = TypeVar("json_type", str, int, float, list, tuple, bool, type(None))
 
 
 class _NestedMutable:
@@ -15,14 +15,17 @@ class _NestedMutable:
 
     def changed(self):
         """Subclasses should call this method whenever change events occur."""
-        if isinstance(self, _NestedMutable) and self._parent_mutable is not None:
+        if (
+            isinstance(self, _NestedMutable)
+            and self._parent_mutable is not None
+        ):
             self._parent_mutable.changed()
 
         for parent, key in self._parents.items():
             flag_modified(parent, key)
 
     @classmethod
-    def coerce(cls, key, value, parent_mutable = None):
+    def coerce(cls, key, value, parent_mutable=None):
         if isinstance(value, cls):
             return value
 
@@ -30,17 +33,21 @@ class _NestedMutable:
             return value
 
         if isinstance(value, dict):
-            return _NestedMutableObject.coerce(key, value, parent_mutable=parent_mutable)
+            return _NestedMutableObject.coerce(
+                key, value, parent_mutable=parent_mutable
+            )
 
         if isinstance(value, (tuple, list)):
-            return _NestedMutableArray.coerce(key, value, parent_mutable=parent_mutable)
+            return _NestedMutableArray.coerce(
+                key, value, parent_mutable=parent_mutable
+            )
 
         return Mutable.coerce(key, value)
 
 
 class _NestedMutableObjectBase(_NestedMutable, MutableDict):
     @classmethod
-    def coerce(cls, key, value, parent_mutable = None):
+    def coerce(cls, key, value, parent_mutable=None):
         if not isinstance(value, dict):
             return Mutable.coerce(key, value)
 
@@ -77,14 +84,18 @@ class _NestedMutableObject(_NestedMutableObjectBase):
         if len(a) > 1:  # not allowed by python
             raise NotImplementedError
         elif len(a) == 1:
-            a = ({k: _NestedMutableObject.coerce(k, v, parent_mutable=self) for k, v in a[0].items()},)
+            a = (
+                {
+                    k: _NestedMutable.coerce(k, v, parent_mutable=self)
+                    for k, v in a[0].items()
+                },
+            )
 
         for k, v in kw.items():
             kw[k] = _NestedMutable.coerce(k, v, parent_mutable=self)
 
         dict.update(self, *a, **kw)
         self.changed()
-
 
 
 class _NestedMutableArray(_NestedMutable, MutableList):
@@ -101,12 +112,17 @@ class _NestedMutableArray(_NestedMutable, MutableList):
 
         # coerce children
         for i, child_value in enumerate(coerced_value):
-            coerced_value[i] = super().coerce(i, child_value, parent_mutable=coerced_value)
+            coerced_value[i] = super().coerce(
+                i, child_value, parent_mutable=coerced_value
+            )
 
         return coerced_value
 
     def __setstate__(self, state):
-        self[:] = [_NestedMutable.coerce(i, x, parent_mutable=self) for i, x in enumerate(state)]
+        self[:] = [
+            _NestedMutable.coerce(i, x, parent_mutable=self)
+            for i, x in enumerate(state)
+        ]
 
     def __setitem__(self, index, value):
         value = _NestedMutable.coerce(index, value, parent_mutable=self)
@@ -120,11 +136,16 @@ class _NestedMutableArray(_NestedMutable, MutableList):
     #     self.changed()
 
     def append(self, x):
-        list.append(self, _NestedMutable.coerce(len(self), x, parent_mutable=self))
+        list.append(
+            self, _NestedMutable.coerce(len(self), x, parent_mutable=self)
+        )
         self.changed()
 
     def extend(self, x):
-        x = [_NestedMutable.coerce(i, y, parent_mutable=self) for i, y in enumerate(x)]
+        x = [
+            _NestedMutable.coerce(i, y, parent_mutable=self)
+            for i, y in enumerate(x)
+        ]
         list.extend(self, x)
         self.changed()
 
@@ -134,8 +155,7 @@ class _NestedMutableArray(_NestedMutable, MutableList):
         self.changed()
 
 
-class _NestedMutableWrapper(_NestedMutableObjectBase):
-    ...
+class _NestedMutableWrapper(_NestedMutableObjectBase): ...
 
 
 def _json_property(key: str, fget=None, fset=None) -> property:
