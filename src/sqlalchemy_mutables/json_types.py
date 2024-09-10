@@ -1,8 +1,19 @@
 from typing import TypeVar
 
-from sqlalchemy import JSON, TypeDecorator
-from sqlalchemy.ext.mutable import Mutable, MutableDict, MutableList
-from sqlalchemy.orm.attributes import flag_modified
+from sqlalchemy import (
+    TypeDecorator,
+    cast,
+    literal,
+)
+from sqlalchemy.dialects.mysql import JSON
+from sqlalchemy.ext.hybrid import hybrid_property
+from sqlalchemy.ext.mutable import (
+    Mutable,
+    MutableDict,
+    MutableList,
+)
+from sqlalchemy.orm.attributes import flag_modified, InstrumentedAttribute
+from sqlalchemy.sql.elements import BinaryExpression
 
 
 _primitive_types = (str, int, float, bool, type(None))
@@ -45,7 +56,7 @@ class _NestedMutable:
         return Mutable.coerce(key, value)
 
 
-class _NestedMutableObjectBase(_NestedMutable, MutableDict):
+class _NestedMutableObject(_NestedMutable, MutableDict):
     @classmethod
     def coerce(cls, key, value, parent_mutable=None):
         if not isinstance(value, dict):
@@ -54,8 +65,7 @@ class _NestedMutableObjectBase(_NestedMutable, MutableDict):
         coerced_value = cls(value)
 
         # set parent for changed event propagation
-        if parent_mutable is not None:
-            coerced_value._parent_mutable = parent_mutable
+        coerced_value._parent_mutable = parent_mutable
 
         # coerce children
         for child_key, child_value in coerced_value.items():
@@ -64,9 +74,6 @@ class _NestedMutableObjectBase(_NestedMutable, MutableDict):
             )
 
         return coerced_value
-
-
-class _NestedMutableObject(_NestedMutableObjectBase):
 
     def __setitem__(self, key, value):
         """Detect dictionary set events and emit change events."""
@@ -101,18 +108,14 @@ class _NestedMutableObject(_NestedMutableObjectBase):
 class _NestedMutableArray(_NestedMutable, MutableList):
     @classmethod
     def coerce(cls, key, value, parent_mutable=None):
-        if not isinstance(value, (list, tuple)):
-            return Mutable.coerce(key, value)
-
         coerced_value = cls(value)
 
         # set parent for changed event propagation
-        if parent_mutable is not None:
-            coerced_value._parent_mutable = parent_mutable
+        coerced_value._parent_mutable = parent_mutable
 
         # coerce children
         for i, child_value in enumerate(coerced_value):
-            coerced_value[i] = super().coerce(
+            coerced_value[i] = _NestedMutable.coerce(
                 i, child_value, parent_mutable=coerced_value
             )
 
@@ -155,29 +158,49 @@ class _NestedMutableArray(_NestedMutable, MutableList):
         self.changed()
 
 
-class _NestedMutableWrapper(_NestedMutableObjectBase): ...
+class _NestedMutableWrapper(_NestedMutable, MutableDict):
+    @classmethod
+    def coerce(cls, key, value, parent_mutable=None):
+        value = _NestedMutable.coerce(key, value, parent_mutable=parent_mutable)
+
+        if not isinstance(value, _NestedMutableWrapper):
+            return cls(value=value)
+
+        return value
+
+    def __eq__(self, other):
+        if isinstance(other, _NestedMutableWrapper):
+            other = other.get("value")
+
+        return self.get("value") == other
+
+    def __str__(self):
+        return str(self.get("value"))
 
 
-def _json_property(key: str, fget=None, fset=None) -> property:
+def _json_property(key: str, fget=None, fset=None) -> hybrid_property:
     def get(self):
-        json_object = getattr(self, key)
-        if not isinstance(json_object, _NestedMutableWrapper):
-            raise Exception  # TODO
+        hybrid_property_ = getattr(self, key)
 
-        # don't assign parent to primitives
-        value = json_object.get("value")
+        # skip if hybrid_property is not instantiated
+        if isinstance(hybrid_property_, InstrumentedAttribute):
+            return hybrid_property_
+
+        value = _NestedMutable.coerce(
+            key, hybrid_property_.get("value"), parent_mutable=self
+        )
 
         # set parent for parsed dict root values
         if isinstance(value, dict):
             for child_value in value.values():
                 if not isinstance(child_value, _primitive_types):
-                    child_value._parent_mutable = json_object
+                    child_value._parent_mutable = hybrid_property_
 
         # set parent for parsed list root values
         if isinstance(value, list):
             for child_value in value:
                 if not isinstance(child_value, _primitive_types):
-                    child_value._parent_mutable = json_object
+                    child_value._parent_mutable = hybrid_property_
 
         if fget is not None:
             value = fget(value)
@@ -187,26 +210,42 @@ def _json_property(key: str, fget=None, fset=None) -> property:
     def set_(self, value):
         if fset is not None:
             value = fset(value)
-        value = _NestedMutable.coerce(key, value)
-        json_object = _NestedMutableWrapper(value=value)
-        if not isinstance(value, _primitive_types):
-            value._parent_mutable = json_object
 
-        setattr(self, key, json_object)
+        setattr(self, key, value)
 
-    return property(fget=get, fset=set_)
+    return hybrid_property(fget=get, fset=set_)
+
+
+class _CustomJSON(JSON):
+    class comparator_factory(JSON.Comparator):
+        def __eq__(self, other):
+            if isinstance(other, (dict, list, tuple)):
+                return BinaryExpression(self.expr, cast(other, JSON()), "=")
+
+            if isinstance(other, type(None)):
+                # TODO: implement 'strict' param? only allow JSON null?
+                return BinaryExpression(
+                    self.expr, cast(literal("null"), JSON()), "="
+                )
+
+            return super().__eq__(other)
 
 
 class JSONType(TypeDecorator):
-    impl = JSON
+    impl = _CustomJSON
+
+    coerce_to_is_types = (type(None), bool)
+
+    def coerce_compared_value(self, op, value):
+        return self.impl.coerce_compared_value(op, value)
 
     def process_bind_param(self, value, dialect):
-        print(type(value.get("value")), value.get("value"))
-        return value.get("value")
+        if isinstance(value, _NestedMutableWrapper):
+            value = value.get("value")
+        return value
 
     def process_result_value(self, value, dialect):
-        value = _NestedMutable.coerce("value", value)
-        return _NestedMutableWrapper(value=value)
+        return value
 
 
 JSONType = _NestedMutableWrapper.as_mutable(JSONType)
