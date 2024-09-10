@@ -195,6 +195,19 @@ class TestDBAPI(TestCase):
     def tearDown(self):
         self._truncate()
 
+    def test_equality_operator(self):
+        values = (None, True, 1, "str", {"a": {"b": "c"}}, ["a", "b"])
+
+        for value in values:
+            self.session.add(Table(column=value))
+        self.session.commit()
+
+        for value in values:
+            result = (
+                self.session.query(Table).filter(Table.column == value).all()
+            )
+            assert len(result) == 1
+
     def test_wrapper_not_persisted_in_db(self):
         # create nested JSON entity
         table = Table(column={"a": "b"})
