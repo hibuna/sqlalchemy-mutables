@@ -4,7 +4,7 @@ from sqlalchemy import Column, Integer, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import create_session, Session
 
-from json_types import (
+from src.sqlalchemy_mutables.json_types import (
     JSONType,
     JSONProperty,
     _NestedMutableObject,
