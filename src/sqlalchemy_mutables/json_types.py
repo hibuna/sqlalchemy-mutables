@@ -164,12 +164,24 @@ class _NestedMutableArray(_NestedMutable, MutableList):
 class _NestedMutableWrapper(_NestedMutable, MutableDict):
     @classmethod
     def coerce(cls, key, value, parent_mutable=None):
-        value = _NestedMutable.coerce(key, value, parent_mutable=parent_mutable)
+        wrapper = cls()
+        value = _NestedMutable.coerce(key, value, parent_mutable=wrapper)
 
-        if not isinstance(value, _NestedMutableWrapper):
-            return cls(value=value)
+        iterator = []
+        if isinstance(value, dict):
+            iterator = value.items()
+        if isinstance(value, tuple):
+            value = list(value)
+        if isinstance(value, list):
+            iterator = enumerate(value)
 
-        return value
+        for id_, sub_value in iterator:
+            value[id_] = _NestedMutable.coerce(
+                id_, sub_value, parent_mutable=value
+            )
+
+        wrapper["value"] = value
+        return wrapper
 
     def __eq__(self, other):
         if isinstance(other, _NestedMutableWrapper):
@@ -189,26 +201,7 @@ def _json_property(key: str, fget=None, fset=None) -> hybrid_property:
         if isinstance(hybrid_property_, InstrumentedAttribute):
             return hybrid_property_
 
-        value = _NestedMutable.coerce(
-            key, hybrid_property_.get("value"), parent_mutable=self
-        )
-
-        # set parent for parsed dict root values
-        if isinstance(value, dict):
-            for child_value in value.values():
-                if not isinstance(child_value, _primitive_types):
-                    child_value._parent_mutable = hybrid_property_
-
-        # set parent for parsed list root values
-        if isinstance(value, list):
-            for child_value in value:
-                if not isinstance(child_value, _primitive_types):
-                    child_value._parent_mutable = hybrid_property_
-
-        if fget is not None:
-            value = fget(value)
-
-        return value
+        return hybrid_property_.get("value")
 
     def set_(self, value):
         if fset is not None:
