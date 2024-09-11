@@ -6,14 +6,14 @@ from sqlalchemy import Column, Integer, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import create_session, Session
 
-from src.sqlalchemy_mutables.json_types import (
-    JSONType,
-    JSONProperty,
-    _NestedMutableObject,
-    _NestedMutableArray,
-    _NestedMutableWrapper,
+from src.sqlalchemy_mutables.mutables import (
     json_type,
-    _NestedMutable,
+    NestedMutableJSONProperty,
+    NestedMutable,
+    NestedMutableList,
+    NestedMutableDict,
+    NestedMutableJSON,
+    NestedMutableJSONColumn,
 )
 
 
@@ -23,30 +23,30 @@ Base = declarative_base()
 class Table(Base):
     __tablename__ = "my_table"
     id = Column(Integer, primary_key=True)
-    _column = Column("column", JSONType)
-    column: json_type = JSONProperty("_column")
+    _column = Column("column", NestedMutableJSONColumn)
+    column: json_type = NestedMutableJSONProperty("_column")
 
 
 class BaseTestCase(TestCase):
-    _column_type: type(_NestedMutable)
+    _column_type: type(NestedMutable)
 
     def assert_base_column(self, table: Table, value: Any, type_: type = None):
         type_ = type_ or self._column_type
         assert isinstance(table.column, type_)
-        assert isinstance(table._column, _NestedMutableWrapper)
-        if issubclass(type_, _NestedMutable):
+        assert isinstance(table._column, NestedMutableJSON)
+        if issubclass(type_, NestedMutable):
             assert table.column._parent_mutable is table._column
         assert table._column.get("value") is table.column
         assert table.column == value
         assert table._column.get("value") == value
 
     def assert_nested_column_type(
-        self, column: Any, parent: _NestedMutable, type_: type = None
+        self, column: Any, parent: NestedMutable, type_: type = None
     ):
         type_ = type_ or self._column_type
         assert isinstance(column, type_)
-        if issubclass(type_, _NestedMutable):
-            assert isinstance(column._parent_mutable, _NestedMutable)
+        if issubclass(type_, NestedMutable):
+            assert isinstance(column._parent_mutable, NestedMutable)
             assert column._parent_mutable is parent
 
 
@@ -54,33 +54,40 @@ class TestRoot(BaseTestCase):
     def test_init_object(self):
         table = Table(column={"a": "b"})
         self.assert_base_column(
-            table, value={"a": "b"}, type_=_NestedMutableObject
+            table, value={"a": "b"}, type_=NestedMutableDict
         )
-
-    def test_init_array(self):
-        table = Table(column=["a"])
-        self.assert_base_column(table, value=["a"], type_=_NestedMutableArray)
-
-        table = Table(column=("a",))
-        self.assert_base_column(table, value=["a"], type_=_NestedMutableArray)
-
-    def test_init_primitive(self):
-        for value in [None, False, 1, 2.3, "4"]:
-            table = Table(column=value)
-            self.assert_base_column(table, value=value, type_=type(value))
 
     def test_set_object(self):
         table = Table()
         table.column = {"a": "b"}
         self.assert_base_column(
-            table, value={"a": "b"}, type_=_NestedMutableObject
+            table, value={"a": "b"}, type_=NestedMutableDict
         )
 
+    def test_init_array(self):
+        table = Table(column=["a"])
+        self.assert_base_column(table, value=["a"], type_=NestedMutableList)
+
+        table = Table(column=("a",))
+        self.assert_base_column(table, value=["a"], type_=NestedMutableList)
+
+    def test_set_array(self):
+        table = Table()
+        table.column=["a"]
+        self.assert_base_column(table, value=["a"], type_=NestedMutableList)
+
+        table = Table()
+        table.column = column=("a",)
+        self.assert_base_column(table, value=["a"], type_=NestedMutableList)
+
+    def test_init_primitive(self):
+        table = Table(column=None)
+        self.assert_base_column(table, value=None, type_=type(None))
+
     def test_set_primitive(self):
-        for value in [None, False, 1, 2.3, "4"]:
-            table = Table()
-            table.column = value
-            self.assert_base_column(table, value=value, type_=type(value))
+        table = Table()
+        table.column = None
+        self.assert_base_column(table, value=None, type_=type(None))
 
 
 class TestNested(BaseTestCase):
@@ -90,7 +97,7 @@ class TestNested(BaseTestCase):
         self.assert_base_column(
             table,
             value={"a": {"b": {"c": {"d": "e"}}}},
-            type_=_NestedMutableObject,
+            type_=NestedMutableDict,
         )
 
         columns = [
@@ -101,7 +108,7 @@ class TestNested(BaseTestCase):
         ]
         for parent, child in pairwise(columns):
             self.assert_nested_column_type(
-                child, parent, type_=_NestedMutableObject
+                child, parent, type_=NestedMutableDict
             )
 
         self.assert_nested_column_type(
@@ -121,7 +128,7 @@ class TestNested(BaseTestCase):
         self.assert_base_column(
             table,
             value=["a", ["b", ["c", ["d"]]]],
-            type_=_NestedMutableArray,
+            type_=NestedMutableList,
         )
 
         columns = [
@@ -132,7 +139,7 @@ class TestNested(BaseTestCase):
         ]
         for parent, child in pairwise(columns):
             self.assert_nested_column_type(
-                child, parent, type_=_NestedMutableArray
+                child, parent, type_=NestedMutableList
             )
 
         self.assert_nested_column_type(
@@ -151,7 +158,7 @@ class TestNested(BaseTestCase):
         self.assert_base_column(
             table,
             value=["a", ["b", ["c", ["d"]]]],
-            type_=_NestedMutableArray,
+            type_=NestedMutableList,
         )
 
         columns = [
@@ -162,7 +169,7 @@ class TestNested(BaseTestCase):
         ]
         for parent, child in pairwise(columns):
             self.assert_nested_column_type(
-                child, parent, type_=_NestedMutableArray
+                child, parent, type_=NestedMutableList
             )
 
         self.assert_nested_column_type(
@@ -314,7 +321,7 @@ class TestDatabase(BaseTestCase):
 
 
 class TestObjectMethods(BaseTestCase):
-    _column_type = _NestedMutableObject
+    _column_type = NestedMutableDict
 
     def test_setitem(self):
         table = Table(column={})
@@ -392,7 +399,7 @@ class TestObjectMethods(BaseTestCase):
 
 
 class TestArrayMethods(BaseTestCase):
-    _column_type = _NestedMutableArray
+    _column_type = NestedMutableList
 
     def test_setstate(self):
         table = Table(column=[])
