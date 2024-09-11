@@ -22,3 +22,6 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/hibuna/sqlalchemy-mutables"
+
+[tool.setuptools.packages.find]
+where = ["src"]
