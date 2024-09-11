@@ -91,21 +91,9 @@ class _NestedMutableObject(_NestedMutable, MutableDict):
         return result
 
     def update(self, *a, **kw):
-        if len(a) > 1:  # not allowed by python
-            raise NotImplementedError
-        elif len(a) == 1:
-            a = (
-                {
-                    k: _NestedMutable.coerce(k, v, parent_mutable=self)
-                    for k, v in a[0].items()
-                },
-            )
-
-        for k, v in kw.items():
-            kw[k] = _NestedMutable.coerce(k, v, parent_mutable=self)
-
-        dict.update(self, *a, **kw)
-        self.changed()
+        dict_ = a[0] if len(a) == 1 else {}
+        for k, v in {**dict_, **kw}.items():
+            self[k] = v
 
 
 class _NestedMutableArray(_NestedMutable, MutableList):
