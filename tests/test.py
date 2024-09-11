@@ -1,5 +1,7 @@
+from typing import Any
 from unittest import TestCase
 
+from more_itertools.recipes import pairwise
 from sqlalchemy import Column, Integer, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import create_session, Session
@@ -11,7 +13,9 @@ from src.sqlalchemy_mutables.json_types import (
     _NestedMutableArray,
     _NestedMutableWrapper,
     json_type,
+    _NestedMutable,
 )
+
 
 Base = declarative_base()
 
@@ -23,156 +27,158 @@ class Table(Base):
     column: json_type = JSONProperty("_column")
 
 
-class TestRoot(TestCase):
+class BaseTestCase(TestCase):
+    _column_type: type(_NestedMutable)
+
+    def assert_base_column(self, table: Table, value: Any, type_: type = None):
+        type_ = type_ or self._column_type
+        assert isinstance(table.column, type_)
+        assert isinstance(table._column, _NestedMutableWrapper)
+        if issubclass(type_, _NestedMutable):
+            assert table.column._parent_mutable is table._column
+        assert table._column.get("value") is table.column
+        assert table.column == value
+        assert table._column.get("value") == value
+
+    def assert_nested_column_type(
+        self, column: Any, parent: _NestedMutable, type_: type = None
+    ):
+        type_ = type_ or self._column_type
+        assert isinstance(column, type_)
+        if issubclass(type_, _NestedMutable):
+            assert isinstance(column._parent_mutable, _NestedMutable)
+            assert column._parent_mutable is parent
+
+
+class TestRoot(BaseTestCase):
     def test_init_object(self):
         table = Table(column={"a": "b"})
-        assert isinstance(table.column, _NestedMutableObject)
-        assert table.column == {"a": "b"}
-        assert isinstance(table._column, _NestedMutableWrapper)
-        assert isinstance(table._column.get("value"), _NestedMutableObject)
-        assert table._column.get("value") == {"a": "b"}
+        self.assert_base_column(
+            table, value={"a": "b"}, type_=_NestedMutableObject
+        )
 
     def test_init_array(self):
         table = Table(column=["a"])
-        assert isinstance(table.column, _NestedMutableArray)
-        assert table.column == ["a"]
-        assert isinstance(table._column, _NestedMutableWrapper)
-        assert isinstance(table._column.get("value"), _NestedMutableArray)
-        assert table._column.get("value") == ["a"]
+        self.assert_base_column(table, value=["a"], type_=_NestedMutableArray)
 
         table = Table(column=("a",))
-        assert isinstance(table.column, _NestedMutableArray)
-        assert table.column == ["a"]
-        assert isinstance(table._column, _NestedMutableWrapper)
-        assert isinstance(table._column.get("value"), _NestedMutableArray)
-        assert table._column.get("value") == ["a"]
+        self.assert_base_column(table, value=["a"], type_=_NestedMutableArray)
 
     def test_init_primitive(self):
-        table = Table(column="str")
-        assert isinstance(table.column, str)
-        assert table.column == "str"
-        assert isinstance(table._column, _NestedMutableWrapper)
-        assert isinstance(table._column.get("value"), str)
-        assert table._column.get("value") == "str"
+        for value in [None, False, 1, 2.3, "4"]:
+            table = Table(column=value)
+            self.assert_base_column(table, value=value, type_=type(value))
 
     def test_set_object(self):
         table = Table()
         table.column = {"a": "b"}
-        assert isinstance(table.column, _NestedMutableObject)
-        assert table.column == {"a": "b"}
-        assert isinstance(table._column, _NestedMutableWrapper)
-        assert isinstance(table._column.get("value"), _NestedMutableObject)
-        assert table._column.get("value") == {"a": "b"}
+        self.assert_base_column(
+            table, value={"a": "b"}, type_=_NestedMutableObject
+        )
 
     def test_set_primitive(self):
-        table = Table()
-        table.column = "str"
-        assert isinstance(table.column, str)
-        assert table.column == "str"
-        assert isinstance(table._column, _NestedMutableWrapper)
-        assert isinstance(table._column.get("value"), str)
-        assert table._column.get("value") == "str"
-
-        table = Table()
-        table.column = 123
-        assert isinstance(table.column, int)
-        assert table.column == 123
-        assert isinstance(table._column, _NestedMutableWrapper)
-        assert isinstance(table._column.get("value"), int)
-        assert table._column.get("value") == 123
-
-        table = Table()
-        table.column = 12.3
-        assert isinstance(table.column, float)
-        assert table.column == 12.3
-        assert isinstance(table._column, _NestedMutableWrapper)
-        assert isinstance(table._column.get("value"), float)
-        assert table._column.get("value") == 12.3
-
-        table = Table()
-        table.column = True
-        assert table.column is True
-        assert isinstance(table._column, _NestedMutableWrapper)
-        assert table._column.get("value") is True
-
-        table = Table()
-        table.column = None
-        assert table.column is None
-        assert table._column.get("value") is None
+        for value in [None, False, 1, 2.3, "4"]:
+            table = Table()
+            table.column = value
+            self.assert_base_column(table, value=value, type_=type(value))
 
 
-class TestNested(TestCase):
-
+class TestNested(BaseTestCase):
     def test_init_nested_object(self):
         table = Table(column={"a": {"b": {"c": {"d": "e"}}}})
-        assert isinstance(table.column, _NestedMutableObject)
-        assert table.column == {"a": {"b": {"c": {"d": "e"}}}}
-        assert isinstance(table._column, _NestedMutableWrapper)
-        assert table._column.get("value") == {"a": {"b": {"c": {"d": "e"}}}}
 
-        assert isinstance(table.column["a"], _NestedMutableObject)
+        self.assert_base_column(
+            table,
+            value={"a": {"b": {"c": {"d": "e"}}}},
+            type_=_NestedMutableObject,
+        )
+
+        columns = [
+            table.column,
+            table.column["a"],
+            table.column["a"]["b"],
+            table.column["a"]["b"]["c"],
+        ]
+        for parent, child in pairwise(columns):
+            self.assert_nested_column_type(
+                child, parent, type_=_NestedMutableObject
+            )
+
+        self.assert_nested_column_type(
+            table.column["a"]["b"]["c"]["d"],
+            table.column["a"]["b"]["c"],
+            type_=str,
+        )
+
         assert table.column["a"] == {"b": {"c": {"d": "e"}}}
-
-        assert isinstance(table.column["a"]["b"], _NestedMutableObject)
         assert table.column["a"]["b"] == {"c": {"d": "e"}}
-
-        assert isinstance(table.column["a"]["b"]["c"], _NestedMutableObject)
         assert table.column["a"]["b"]["c"] == {"d": "e"}
-
-        assert isinstance(table.column["a"]["b"]["c"]["d"], str)
         assert table.column["a"]["b"]["c"]["d"] == "e"
 
     def test_init_nested_array(self):
         table = Table(column=["a", ["b", ["c", ["d"]]]])
-        assert isinstance(table.column, _NestedMutableArray)
-        assert table.column == ["a", ["b", ["c", ["d"]]]]
-        assert isinstance(table._column, _NestedMutableWrapper)
-        assert table._column.get("value") == ["a", ["b", ["c", ["d"]]]]
 
-        assert isinstance(table.column[0], str)
+        self.assert_base_column(
+            table,
+            value=["a", ["b", ["c", ["d"]]]],
+            type_=_NestedMutableArray,
+        )
+
+        columns = [
+            table.column,
+            table.column[1],
+            table.column[1][1],
+            table.column[1][1][1],
+        ]
+        for parent, child in pairwise(columns):
+            self.assert_nested_column_type(
+                child, parent, type_=_NestedMutableArray
+            )
+
+        self.assert_nested_column_type(
+            table.column[1][1][1][0], table.column[1][1][1], type_=str
+        )
+
         assert table.column[0] == "a"
-        assert isinstance(table.column[1], _NestedMutableArray)
         assert table.column[1] == ["b", ["c", ["d"]]]
-
-        assert isinstance(table.column[1][0], str)
         assert table.column[1][0] == "b"
-        assert isinstance(table.column[1][1], _NestedMutableArray)
         assert table.column[1][1] == ["c", ["d"]]
-
-        assert isinstance(table.column[1][1][0], str)
         assert table.column[1][1][0] == "c"
-        assert isinstance(table.column[1][1][1], _NestedMutableArray)
         assert table.column[1][1][1] == ["d"]
-
-        assert isinstance(table.column[1][1][1][0], str)
         assert table.column[1][1][1][0] == "d"
 
         table = Table(column=("a", ("b", ("c", ("d",)))))
-        assert isinstance(table.column, _NestedMutableArray)
-        assert table.column == ["a", ["b", ["c", ["d"]]]]
-        assert isinstance(table._column, _NestedMutableWrapper)
-        assert table._column.get("value") == ["a", ["b", ["c", ["d"]]]]
+        self.assert_base_column(
+            table,
+            value=["a", ["b", ["c", ["d"]]]],
+            type_=_NestedMutableArray,
+        )
 
-        assert isinstance(table.column[0], str)
+        columns = [
+            table.column,
+            table.column[1],
+            table.column[1][1],
+            table.column[1][1][1],
+        ]
+        for parent, child in pairwise(columns):
+            self.assert_nested_column_type(
+                child, parent, type_=_NestedMutableArray
+            )
+
+        self.assert_nested_column_type(
+            table.column[1][1][1][0], table.column[1][1][1], type_=str
+        )
+
         assert table.column[0] == "a"
-        assert isinstance(table.column[1], _NestedMutableArray)
         assert table.column[1] == ["b", ["c", ["d"]]]
-
-        assert isinstance(table.column[1][0], str)
         assert table.column[1][0] == "b"
-        assert isinstance(table.column[1][1], _NestedMutableArray)
         assert table.column[1][1] == ["c", ["d"]]
-
-        assert isinstance(table.column[1][1][0], str)
         assert table.column[1][1][0] == "c"
-        assert isinstance(table.column[1][1][1], _NestedMutableArray)
         assert table.column[1][1][1] == ["d"]
-
-        assert isinstance(table.column[1][1][1][0], str)
         assert table.column[1][1][1][0] == "d"
 
 
-class TestDBAPI(TestCase):
+class TestDatabase(BaseTestCase):
     session: Session
 
     @classmethod
@@ -291,144 +297,202 @@ class TestDBAPI(TestCase):
         self.session.add(table)
         self.session.commit()
 
+        assert table.column._parent_mutable is table._column
         assert len(table.column) == 3
         for value in table.column.values():
-            assert value._parent_mutable is table._column
+            assert value._parent_mutable is table.column
 
     def test_multiple_root_arrays_get_parent(self):
         table = Table(column=[["a"], ("b",), {"c": "d"}])
         self.session.add(table)
         self.session.commit()
 
+        assert table.column._parent_mutable is table._column
         assert len(table.column) == 3
         for value in table.column:
-            assert value._parent_mutable is table._column
+            assert value._parent_mutable is table.column
 
 
-class TestObjectMethods(TestCase):
+class TestObjectMethods(BaseTestCase):
+    _column_type = _NestedMutableObject
+
     def test_setitem(self):
-        object = _NestedMutableObject()
-        object["a"] = {"b": {"c": "d"}}
-        assert object["a"] == {"b": {"c": "d"}}
-        assert object["a"]._parent_mutable is object
-        assert isinstance(object["a"]["b"], _NestedMutableObject)
-        assert object["a"]["b"] == {"c": "d"}
-        assert object["a"]["b"]._parent_mutable is object["a"]
+        table = Table(column={})
+        table.column["a"] = {"b": {"c": "d"}}
+
+        self.assert_base_column(table, value={"a": {"b": {"c": "d"}}})
+
+        columns = [table.column, table.column["a"], table.column["a"]["b"]]
+        for parent, child in pairwise(columns):
+            self.assert_nested_column_type(child, parent)
+        self.assert_nested_column_type(
+            table.column["a"]["b"]["c"], table.column["a"]["b"], type_=str
+        )
+
+        assert table.column["a"] == {"b": {"c": "d"}}
+        assert table.column["a"]["b"] == {"c": "d"}
+        assert table.column["a"]["b"]["c"] == "d"
 
     def test_setdefault(self):
-        object = _NestedMutableObject({"a": {"b": "c"}})
-        object.setdefault("d", {"e": "f"})
-        assert isinstance(object["d"], _NestedMutableObject)
-        assert object["d"] == {"e": "f"}
-        assert object["d"]._parent_mutable is object
+        table = Table(column={"a": {"b": "c"}})
+        table.column.setdefault("d", {"e": "f"})
+
+        self.assert_base_column(table, value={"a": {"b": "c"}, "d": {"e": "f"}})
+        self.assert_nested_column_type(table.column["a"], table.column)
+        self.assert_nested_column_type(
+            table.column["a"]["b"], table.column["a"], type_=str
+        )
+        self.assert_nested_column_type(table.column["d"], table.column)
+        self.assert_nested_column_type(
+            table.column["d"]["e"], table.column["d"], type_=str
+        )
+
+        assert table.column == {"a": {"b": "c"}, "d": {"e": "f"}}
+        assert table.column["a"] == {"b": "c"}
+        assert table.column["a"]["b"] == "c"
+        assert table.column["d"] == {"e": "f"}
+        assert table.column["d"]["e"] == "f"
 
     def test_update(self):
-        object = _NestedMutableObject({"a": "b"})
-        object.update({"c": {"d": {"e": "f"}}}, g={"h": {"i": "j"}})
+        table = Table(column={"a": "b"})
+        table.column.update({"c": {"d": {"e": "f"}}}, g={"h": {"i": "j"}})
 
-        assert isinstance(object, _NestedMutableObject)
-        assert object == {
+        expected = {
             "a": "b",
             "c": {"d": {"e": "f"}},
             "g": {"h": {"i": "j"}},
         }
-        assert object._parent_mutable is None
+        self.assert_base_column(table, value=expected)
 
-        assert isinstance(object["c"], _NestedMutableObject)
-        assert object["c"] == {"d": {"e": "f"}}
-        assert object["c"]._parent_mutable is object
+        columns = [table.column, table.column["c"], table.column["c"]["d"]]
+        for parent, child in pairwise(columns):
+            self.assert_nested_column_type(child, parent)
 
-        assert isinstance(object["c"]["d"], _NestedMutableObject)
-        assert object["c"]["d"] == {"e": "f"}
-        assert object["c"]["d"]._parent_mutable is object["c"]
+        columns = [table.column, table.column["g"], table.column["g"]["h"]]
+        for parent, child in pairwise(columns):
+            self.assert_nested_column_type(child, parent)
 
-        assert isinstance(object["g"], _NestedMutableObject)
-        assert object["g"] == {"h": {"i": "j"}}
-        assert object["g"]._parent_mutable is object
+        self.assert_nested_column_type(
+            table.column["a"], table.column, type_=str
+        )
+        self.assert_nested_column_type(
+            table.column["c"]["d"]["e"], table.column["c"]["d"], type_=str
+        )
+        self.assert_nested_column_type(
+            table.column["g"]["h"]["i"], table.column["g"]["h"], type_=str
+        )
 
-        assert isinstance(object["g"]["h"], _NestedMutableObject)
-        assert object["g"]["h"] == {"i": "j"}
-        assert object["g"]["h"]._parent_mutable is object["g"]
+        assert table.column["a"] == "b"
+        assert table.column["c"] == {"d": {"e": "f"}}
+        assert table.column["c"]["d"] == {"e": "f"}
+        assert table.column["c"]["d"]["e"] == "f"
+        assert table.column["g"] == {"h": {"i": "j"}}
+        assert table.column["g"]["h"] == {"i": "j"}
+        assert table.column["g"]["h"]["i"] == "j"
 
 
-class TestArrayMethods(TestCase):
+class TestArrayMethods(BaseTestCase):
+    _column_type = _NestedMutableArray
+
     def test_setstate(self):
-        array = _NestedMutableArray()
-        array.__setstate__(["a", ["b", ["c"]]])
+        table = Table(column=[])
+        table.column.__setstate__(["a", ["b", ["c"]]])
 
-        assert isinstance(array, _NestedMutableArray)
-        assert array == ["a", ["b", ["c"]]]
-        assert array._parent_mutable is None
+        self.assert_base_column(table, value=["a", ["b", ["c"]]])
 
-        assert isinstance(array[1], _NestedMutableArray)
-        assert array[1] == ["b", ["c"]]
-        assert array[1]._parent_mutable is array
+        columns = [table.column, table.column[1], table.column[1][1]]
+        for parent, child in pairwise(columns):
+            self.assert_nested_column_type(child, parent)
+        self.assert_nested_column_type(
+            table.column[1][1][0], table.column[1][1], type_=str
+        )
 
-        assert isinstance(array[1][1], _NestedMutableArray)
-        assert array[1][1] == ["c"]
-        assert array[1][1]._parent_mutable is array[1]
+        assert table.column[1] == ["b", ["c"]]
+        assert table.column[1][0] == "b"
+        assert table.column[1][1] == ["c"]
+        assert table.column[1][1][0] == "c"
 
     def test_setitem(self):
-        array = _NestedMutableArray(["a", ["b", ["c"]]])
-        array[1] = ["d", ["e"]]
+        table = Table(column=["a", ["b", ["c"]]])
+        table.column[1] = ["d", ["e"]]
 
-        assert isinstance(array, _NestedMutableArray)
-        assert array == ["a", ["d", ["e"]]]
-        assert array._parent_mutable is None
+        self.assert_base_column(table, value=["a", ["d", ["e"]]])
 
-        assert isinstance(array[1], _NestedMutableArray)
-        assert array[1] == ["d", ["e"]]
-        assert array[1]._parent_mutable is array
+        columns = [table.column, table.column[1], table.column[1][1]]
+        for parent, child in pairwise(columns):
+            self.assert_nested_column_type(child, parent)
+        self.assert_nested_column_type(
+            table.column[1][1][0], table.column[1][1], type_=str
+        )
 
-        assert isinstance(array[1][1], _NestedMutableArray)
-        assert array[1][1] == ["e"]
-        assert array[1][1]._parent_mutable is array[1]
+        assert table.column[1] == ["d", ["e"]]
+        assert table.column[1][0] == "d"
+        assert table.column[1][1] == ["e"]
+        assert table.column[1][1][0] == "e"
 
     def test_append(self):
-        array = _NestedMutableArray()
-        array.append(["a", ["b", ["c"]]])
+        table = Table(column=[])
+        table.column.append(["a", ["b", ["c"]]])
 
-        assert isinstance(array[0], _NestedMutableArray)
-        assert array[0] == ["a", ["b", ["c"]]]
-        assert array[0]._parent_mutable is array
+        self.assert_base_column(table, value=[["a", ["b", ["c"]]]])
 
-        assert isinstance(array[0][1], _NestedMutableArray)
-        assert array[0][1] == ["b", ["c"]]
-        assert array[0][1]._parent_mutable is array[0]
+        columns = [
+            table.column,
+            table.column[0],
+            table.column[0][1],
+            table.column[0][1][1],
+        ]
+        for parent, child in pairwise(columns):
+            self.assert_nested_column_type(child, parent)
+        self.assert_nested_column_type(
+            table.column[0][1][1][0], table.column[0][1][1], type_=str
+        )
 
-        assert isinstance(array[0][1][1], _NestedMutableArray)
-        assert array[0][1][1] == ["c"]
-        assert array[0][1][1]._parent_mutable is array[0][1]
+        assert table.column[0] == ["a", ["b", ["c"]]]
+        assert table.column[0][0] == "a"
+        assert table.column[0][1] == ["b", ["c"]]
+        assert table.column[0][1][0] == "b"
+        assert table.column[0][1][1] == ["c"]
+        assert table.column[0][1][1][0] == "c"
 
     def test_extend(self):
-        array = _NestedMutableArray()
-        array.extend(["a", ["b", ["c"]]])
+        table = Table(column=[])
+        table.column.extend(["a", ["b", ["c"]]])
 
-        assert isinstance(array, _NestedMutableArray)
-        assert array == ["a", ["b", ["c"]]]
-        assert array._parent_mutable is None
+        self.assert_base_column(table, value=["a", ["b", ["c"]]])
 
-        assert isinstance(array[1], _NestedMutableArray)
-        assert array[1] == ["b", ["c"]]
-        assert array[1]._parent_mutable is array
+        columns = [table.column, table.column[1], table.column[1][1]]
+        for parent, child in pairwise(columns):
+            self.assert_nested_column_type(child, parent)
+        self.assert_nested_column_type(
+            table.column[1][1][0], table.column[1][1], type_=str
+        )
 
-        assert isinstance(array[1][1], _NestedMutableArray)
-        assert array[1][1] == ["c"]
-        assert array[1][1]._parent_mutable is array[1]
+        assert table.column[0] == "a"
+        assert table.column[1] == ["b", ["c"]]
+        assert table.column[1][0] == "b"
+        assert table.column[1][1] == ["c"]
+        assert table.column[1][1][0] == "c"
 
     def test_insert(self):
-        array = _NestedMutableArray(["a", "b", "c"])
-        array.insert(1, ["d", ["e", ["f"]]])
-        assert array == ["a", ["d", ["e", ["f"]]], "b", "c"]
+        table = Table(column=["a", "b", "c"])
+        table.column.insert(1, ["d", ["e", ["f"]]])
 
-        assert isinstance(array[1], _NestedMutableArray)
-        assert array[1] == ["d", ["e", ["f"]]]
-        assert array[1]._parent_mutable is array
+        self.assert_base_column(
+            table, value=["a", ["d", ["e", ["f"]]], "b", "c"]
+        )
 
-        assert isinstance(array[1][1], _NestedMutableArray)
-        assert array[1][1] == ["e", ["f"]]
-        assert array[1][1]._parent_mutable is array[1]
+        columns = [table.column, table.column[1], table.column[1][1]]
+        for parent, child in pairwise(columns):
+            self.assert_nested_column_type(child, parent)
+        self.assert_nested_column_type(
+            table.column[1][1][0], table.column[1][1], type_=str
+        )
 
-        assert isinstance(array[1][1][1], _NestedMutableArray)
-        assert array[1][1][1] == ["f"]
-        assert array[1][1][1]._parent_mutable is array[1][1]
+        assert table.column[0] == "a"
+        assert table.column[1] == ["d", ["e", ["f"]]]
+        assert table.column[1][1] == ["e", ["f"]]
+        assert table.column[1][1][1] == ["f"]
+        assert table.column[1][1][1][0] == "f"
+        assert table.column[2] == "b"
+        assert table.column[3] == "c"
