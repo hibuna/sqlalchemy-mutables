@@ -12,7 +12,7 @@ __all__ = [
     "NestedMutableListColumn",
     "NestedMutableDictColumn",
     "NestedMutableJSONColumn",
-    "NestedMutableJSONProperty"
+    "NestedMutableJSONProperty",
 ]
 
 

@@ -50,11 +50,11 @@ class TestRoot(BaseTestCase):
 
     def test_set_array(self):
         table = Table()
-        table.column=["a"]
+        table.column = ["a"]
         self.assert_base_column(table, value=["a"], type_=NestedMutableList)
 
         table = Table()
-        table.column = column=("a",)
+        table.column = ("a",)
         self.assert_base_column(table, value=["a"], type_=NestedMutableList)
 
     def test_init_primitive(self):
