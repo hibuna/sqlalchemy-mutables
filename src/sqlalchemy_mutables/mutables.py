@@ -193,7 +193,12 @@ def _json_property(key: str, fget=None, fset=None) -> hybrid_property:
         if isinstance(hybrid_property_, InstrumentedAttribute):
             return hybrid_property_
 
-        return hybrid_property_.get("value")
+        value = hybrid_property_.get("value")
+
+        if fget is not None:
+            value = fget(value)
+
+        return value
 
     def set_(self, value):
         if fset is not None:
