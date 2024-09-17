@@ -89,6 +89,40 @@ class TestRoot(BaseTestCase):
         table.column = None
         self.assert_base_column(table, value=None, type_=type(None))
 
+    def test_getter_and_setter(self):
+        def json_getter(value):
+            return "GOT"
+
+        def json_setter(value):
+            return "SET"
+
+        class EntityWithGetter(Base):
+            __tablename__ = "entity_with_getter"
+            id = Column(Integer, primary_key=True)
+            _column = Column("column", NestedMutableJSONColumn)
+            column: json_type = NestedMutableJSONProperty(
+                "_column",
+                fget=json_getter,
+            )
+
+        class EntityWithSetter(Base):
+            __tablename__ = "entity_with_setter"
+            id = Column(Integer, primary_key=True)
+            _column = Column("column", NestedMutableJSONColumn)
+            column: json_type = NestedMutableJSONProperty(
+                "_column",
+                fset=json_setter,
+            )
+
+        entity = EntityWithGetter()
+        entity.column = "foo"
+        assert entity.column == "GOT"
+
+        entity = EntityWithSetter()
+        entity.column = "foo"
+        assert entity.column == "SET"
+
+
 
 class TestNested(BaseTestCase):
     def test_init_nested_object(self):
