@@ -2,7 +2,7 @@
 
 A minimal package for nested mutable datatypes in SQLAlchemy. Main feature is a JSON field that is RFC-7159 compliant.
 
-Developed for SQLAlchemy `v1.3.24`. Your mileage may very with other versions.
+Developed for SQLAlchemy `v1.3.24`. Your mileage may vary with other versions.
 
 ## Installation
 ```
